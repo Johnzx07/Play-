@@ -15,7 +15,7 @@ jobs:
     - name: Set up JDK
       uses: actions/setup-java@v6
       with:
-        distribution: 'adopt'
+        distribution: 'temurin'
         java-version: '17'
     - name: Install NDK
       run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;${{ env.ANDROID_NDK_VERSION }}"
