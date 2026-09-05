@@ -9,6 +9,88 @@
 #import "CoverViewCell.h"
 #import "AltServerJitService.h"
 
+#include <sys/mman.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
+
+#ifndef MAP_JIT
+#define MAP_JIT 0x800
+#endif
+
+// ---- Temporary JIT self-test (diagnostic) --------------------------------
+// Probes each way of getting executable memory and reports the resulting page
+// protection, WITHOUT executing (so it can't crash). 'x' in max protection
+// means that method can produce runnable JIT memory on this device.
+static NSString* SC_ProtString(vm_prot_t p)
+{
+	return [NSString stringWithFormat:@"%c%c%c",
+		(p & VM_PROT_READ) ? 'r' : '-',
+		(p & VM_PROT_WRITE) ? 'w' : '-',
+		(p & VM_PROT_EXECUTE) ? 'x' : '-'];
+}
+
+static NSString* SC_QueryProt(void* mem)
+{
+	mach_vm_address_t addr = (mach_vm_address_t)(uintptr_t)mem;
+	mach_vm_size_t vmsize = 0;
+	vm_region_basic_info_data_64_t info;
+	mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+	mach_port_t obj = MACH_PORT_NULL;
+	kern_return_t kr = mach_vm_region(mach_task_self(), &addr, &vmsize,
+		VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &count, &obj);
+	if(kr != KERN_SUCCESS) return @"prot=?";
+	return [NSString stringWithFormat:@"prot=%@ max=%@",
+		SC_ProtString(info.protection), SC_ProtString(info.max_protection)];
+}
+
+static NSString* SC_ProbeMapJit()
+{
+	const size_t sz = 16384;
+	void* mem = mmap(NULL, sz, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANON|MAP_JIT, -1, 0);
+	if(mem == MAP_FAILED) return [NSString stringWithFormat:@"MAP_JIT: mmap FAILED errno=%d", errno];
+	typedef void (*wpfn)(int);
+	wpfn wp = (wpfn)dlsym(RTLD_DEFAULT, "pthread_jit_write_protect_np");
+	uint32_t code[2] = {0x52800540u, 0xD65F03C0u};
+	if(wp) wp(0);
+	memcpy(mem, code, sizeof(code));
+	if(wp) wp(1);
+	NSString* r = [NSString stringWithFormat:@"MAP_JIT(wp=%@): %@", wp?@"y":@"NIL", SC_QueryProt(mem)];
+	munmap(mem, sz);
+	return r;
+}
+
+static NSString* SC_ProbeRWX()
+{
+	const size_t sz = 16384;
+	void* mem = mmap(NULL, sz, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANON, -1, 0);
+	if(mem == MAP_FAILED) return [NSString stringWithFormat:@"RWX: mmap FAILED errno=%d", errno];
+	uint32_t code[2] = {0x52800540u, 0xD65F03C0u};
+	memcpy(mem, code, sizeof(code));
+	NSString* r = [NSString stringWithFormat:@"RWX: %@", SC_QueryProt(mem)];
+	munmap(mem, sz);
+	return r;
+}
+
+static NSString* SC_ProbeMprotect()
+{
+	const size_t sz = 16384;
+	void* mem = mmap(NULL, sz, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0);
+	if(mem == MAP_FAILED) return [NSString stringWithFormat:@"mprot: mmap FAILED errno=%d", errno];
+	uint32_t code[2] = {0x52800540u, 0xD65F03C0u};
+	memcpy(mem, code, sizeof(code));
+	int mp = mprotect(mem, sz, PROT_READ|PROT_EXEC);
+	NSString* r = (mp != 0)
+		? [NSString stringWithFormat:@"mprot RX: FAILED errno=%d", errno]
+		: [NSString stringWithFormat:@"mprot RX: OK %@", SC_QueryProt(mem)];
+	munmap(mem, sz);
+	return r;
+}
+// --------------------------------------------------------------------------
+
 static bool IsJitAvailable()
 {
 	//If ppid != 1, it means we're being run in the debugger
@@ -122,6 +204,26 @@ static NSString* const reuseIdentifier = @"coverCell";
 
 	[[AltServerJitService sharedAltServerJitService] startProcess];
 	[self buildCollectionWithForcedFullScan:NO];
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+	[super viewDidAppear:animated];
+	static BOOL s_jitTestShown = NO;
+	if(s_jitTestShown) return;
+	s_jitTestShown = YES;
+
+	NSMutableArray* lines = [NSMutableArray array];
+	[lines addObject:[NSString stringWithFormat:@"ppid=%d", getppid()]];
+	[lines addObject:SC_ProbeMapJit()];
+	[lines addObject:SC_ProbeRWX()];
+	[lines addObject:SC_ProbeMprotect()];
+	NSString* msg = [lines componentsJoinedByString:@"\n"];
+
+	UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"JIT Self-Test"
+		message:msg preferredStyle:UIAlertControllerStyleAlert];
+	[alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+	[self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)viewDidUnload
