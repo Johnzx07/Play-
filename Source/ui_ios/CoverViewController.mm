@@ -205,26 +205,6 @@ static NSString* const reuseIdentifier = @"coverCell";
 	[self buildCollectionWithForcedFullScan:NO];
 }
 
-- (void)viewDidAppear:(BOOL)animated
-{
-	[super viewDidAppear:animated];
-	static BOOL s_jitTestShown = NO;
-	if(s_jitTestShown) return;
-	s_jitTestShown = YES;
-
-	NSMutableArray* lines = [NSMutableArray array];
-	[lines addObject:[NSString stringWithFormat:@"ppid=%d", getppid()]];
-	[lines addObject:SC_ProbeMapJit()];
-	[lines addObject:SC_ProbeRWX()];
-	[lines addObject:SC_ProbeMprotect()];
-	NSString* msg = [lines componentsJoinedByString:@"\n"];
-
-	UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"JIT Self-Test"
-		message:msg preferredStyle:UIAlertControllerStyleAlert];
-	[alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-	[self presentViewController:alert animated:YES completion:nil];
-}
-
 - (void)viewDidUnload
 {
 	assert(_bootables != nullptr);
@@ -292,7 +272,10 @@ static NSString* const reuseIdentifier = @"coverCell";
 {
 	if([identifier isEqualToString:@"showEmulator"] && !IsJitAvailable())
 	{
-		UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"JIT unavailable" message:@"JIT doesn't seem to be available at the moment. If JIT is not available, the emulator will crash. Do you wish to continue?" preferredStyle:UIAlertControllerStyleAlert];
+		NSString* probeMsg = [NSString stringWithFormat:
+			@"JIT probe (which method gives an executable 'x' page):\n\n%@\n%@\n%@\n\nppid=%d",
+			SC_ProbeMapJit(), SC_ProbeRWX(), SC_ProbeMprotect(), getppid()];
+		UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"JIT unavailable" message:probeMsg preferredStyle:UIAlertControllerStyleAlert];
 		{
 			UIAlertAction* continueAction = [UIAlertAction
 			    actionWithTitle:@"Continue"
