@@ -11,7 +11,6 @@
 
 #include <sys/mman.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <string.h>
@@ -35,12 +34,12 @@ static NSString* SC_ProtString(vm_prot_t p)
 
 static NSString* SC_QueryProt(void* mem)
 {
-	mach_vm_address_t addr = (mach_vm_address_t)(uintptr_t)mem;
-	mach_vm_size_t vmsize = 0;
+	vm_address_t addr = (vm_address_t)(uintptr_t)mem;
+	vm_size_t vmsize = 0;
 	vm_region_basic_info_data_64_t info;
 	mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
 	mach_port_t obj = MACH_PORT_NULL;
-	kern_return_t kr = mach_vm_region(mach_task_self(), &addr, &vmsize,
+	kern_return_t kr = vm_region_64(mach_task_self(), &addr, &vmsize,
 		VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &count, &obj);
 	if(kr != KERN_SUCCESS) return @"prot=?";
 	return [NSString stringWithFormat:@"prot=%@ max=%@",
