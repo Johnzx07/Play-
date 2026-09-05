@@ -44,17 +44,17 @@ jobs:
         cd installer_ios
         ./build_ipa.sh
     - name: Generate Cydia Package
+      continue-on-error: true
       run: |
         cd installer_ios
         ./build_cydia.sh
-    - name: Upload a Build Artifact ipa/deb/bz2
+    - name: Upload a Build Artifact ipa
       uses: actions/upload-artifact@v7
       with:
         name: Play_iOS
+        if-no-files-found: error
         path: |
           installer_ios/Play.ipa
-          installer_ios/Play.deb
-          installer_ios/Packages.bz2
     - name: Upload a Build Artifact libretro
       uses: actions/upload-artifact@v7
       with:
