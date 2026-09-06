@@ -38,7 +38,7 @@ jobs:
       run: |
         cd build
         cmake --build . --config Release
-        codesign -s "-" Source/ui_ios/Release-iphoneos/Play.app
+        codesign -s "-" --entitlements ../Source/ui_ios/Play.entitlements --generate-entitlement-der Source/ui_ios/Release-iphoneos/Play.app
     - name: Generate IPA
       run: |
         cd installer_ios
