@@ -20,6 +20,12 @@
 #define MAP_JIT 0x800
 #endif
 
+// iOS 26 TXM JIT arena (implemented in CodeGen/src/MemoryFunction.cpp). The
+// arena must be reserved and blessed while the JIT script is still attached,
+// so kick it off as early as we have a view.
+extern "C" void MemFunc_InitJitArena(void);
+extern "C" const char* MemFunc_GetJitStatus(void);
+
 // ---- Temporary JIT self-test (diagnostic) --------------------------------
 // Probes each way of getting executable memory and reports the resulting page
 // protection, WITHOUT executing (so it can't crash). 'x' in max protection
@@ -215,6 +221,10 @@ static NSString* const reuseIdentifier = @"coverCell";
 {
 	[super viewDidLoad];
 
+	// Reserve + bless the JIT arena now, before any game is booted: the JIT
+	// script can only prepare regions while it is still attached.
+	MemFunc_InitJitArena();
+
 	CAGradientLayer* bgLayer = [BackgroundLayer blueGradient];
 	bgLayer.frame = self.view.bounds;
 	[self.view.layer insertSublayer:bgLayer atIndex:0];
@@ -297,8 +307,9 @@ static NSString* const reuseIdentifier = @"coverCell";
 	if([identifier isEqualToString:@"showEmulator"] && !IsJitAvailable())
 	{
 		NSString* probeMsg = [NSString stringWithFormat:
-			@"JIT probe:\n\n%@\n%@\n%@\n%@\n\n%@\nppid=%d",
-			SC_ProbeMapJit(), SC_ProbeRWX(), SC_ProbeMprotect(), SC_ProbeRwxThenMprotect(),
+			@"%s\n\n%@\n%@\n\n%@\nppid=%d",
+			MemFunc_GetJitStatus(),
+			SC_ProbeMapJit(), SC_ProbeRwxThenMprotect(),
 			SC_CsDebugged(), getppid()];
 		UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"JIT unavailable" message:probeMsg preferredStyle:UIAlertControllerStyleAlert];
 		{
