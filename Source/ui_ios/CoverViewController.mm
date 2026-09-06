@@ -88,6 +88,30 @@ static NSString* SC_ProbeMprotect()
 	munmap(mem, sz);
 	return r;
 }
+
+// The exact sequence our CodeGen fix uses: mmap RWX (max=rwx) then mprotect r-x.
+static NSString* SC_ProbeRwxThenMprotect()
+{
+	const size_t sz = 16384;
+	void* mem = mmap(NULL, sz, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANON, -1, 0);
+	if(mem == MAP_FAILED) return [NSString stringWithFormat:@"RWX>RX: mmap FAILED errno=%d", errno];
+	uint32_t code[2] = {0x52800540u, 0xD65F03C0u};
+	memcpy(mem, code, sizeof(code));
+	int mp = mprotect(mem, sz, PROT_READ|PROT_EXEC);
+	NSString* r = [NSString stringWithFormat:@"RWX>RX: mp=%d %@", mp, SC_QueryProt(mem)];
+	munmap(mem, sz);
+	return r;
+}
+
+// Is the process actually JIT-enabled (debugger attached / CS_DEBUGGED)?
+extern "C" int csops(pid_t pid, unsigned int ops, void* useraddr, size_t usersize);
+static NSString* SC_CsDebugged()
+{
+	uint32_t flags = 0;
+	int rc = csops(getpid(), 0 /*CS_OPS_STATUS*/, &flags, sizeof(flags));
+	bool dbg = (flags & 0x10000000u) != 0; // CS_DEBUGGED
+	return [NSString stringWithFormat:@"CS_DEBUGGED=%d (csops rc=%d flags=0x%x)", dbg?1:0, rc, flags];
+}
 // --------------------------------------------------------------------------
 
 static bool IsJitAvailable()
@@ -273,8 +297,9 @@ static NSString* const reuseIdentifier = @"coverCell";
 	if([identifier isEqualToString:@"showEmulator"] && !IsJitAvailable())
 	{
 		NSString* probeMsg = [NSString stringWithFormat:
-			@"JIT probe (which method gives an executable 'x' page):\n\n%@\n%@\n%@\n\nppid=%d",
-			SC_ProbeMapJit(), SC_ProbeRWX(), SC_ProbeMprotect(), getppid()];
+			@"JIT probe:\n\n%@\n%@\n%@\n%@\n\n%@\nppid=%d",
+			SC_ProbeMapJit(), SC_ProbeRWX(), SC_ProbeMprotect(), SC_ProbeRwxThenMprotect(),
+			SC_CsDebugged(), getppid()];
 		UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"JIT unavailable" message:probeMsg preferredStyle:UIAlertControllerStyleAlert];
 		{
 			UIAlertAction* continueAction = [UIAlertAction
