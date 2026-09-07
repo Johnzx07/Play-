@@ -1,3 +1,4 @@
+#include <cmath>
 #include "GSH_VulkanDrawMobile.h"
 #include "GSH_VulkanDrawUtils.h"
 #include "GSH_VulkanMemoryUtils.h"
@@ -248,10 +249,14 @@ void CDrawMobile::FlushRenderPass()
 
 		//Store to memory
 
-		int32 clippedX0 = std::clamp<int32>(m_renderPassMinX, m_scissorX, m_scissorX + m_scissorWidth);
-		int32 clippedX1 = std::clamp<int32>(m_renderPassMaxX, m_scissorX, m_scissorX + m_scissorWidth);
-		int32 clippedY0 = std::clamp<int32>(m_renderPassMinY, m_scissorY, m_scissorY + m_scissorHeight);
-		int32 clippedY1 = std::clamp<int32>(m_renderPassMaxY, m_scissorY, m_scissorY + m_scissorHeight);
+		//These bounds are floating point primitive coordinates. Converting them to
+		//int32 truncates, which drops the last row and column of rasterized pixels
+		//from the stored region and leaves thin lines of stale framebuffer content
+		//along primitive edges. Round outwards instead.
+		int32 clippedX0 = std::clamp<int32>(std::floor(m_renderPassMinX), m_scissorX, m_scissorX + m_scissorWidth);
+		int32 clippedX1 = std::clamp<int32>(std::ceil(m_renderPassMaxX), m_scissorX, m_scissorX + m_scissorWidth);
+		int32 clippedY0 = std::clamp<int32>(std::floor(m_renderPassMinY), m_scissorY, m_scissorY + m_scissorHeight);
+		int32 clippedY1 = std::clamp<int32>(std::ceil(m_renderPassMaxY), m_scissorY, m_scissorY + m_scissorHeight);
 
 		VkRect2D scissor = {};
 		scissor.offset.x = clippedX0;
