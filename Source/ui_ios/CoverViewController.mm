@@ -9,119 +9,18 @@
 #import "CoverViewCell.h"
 #import "AltServerJitService.h"
 
-#include <sys/mman.h>
-#include <mach/mach.h>
-#include <dlfcn.h>
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
-
-#ifndef MAP_JIT
-#define MAP_JIT 0x800
-#endif
-
-// iOS 26 TXM JIT arena (implemented in CodeGen/src/MemoryFunction.cpp). The
-// arena must be reserved and blessed while the JIT script is still attached,
-// so kick it off as early as we have a view.
+//iOS 26 JIT support, implemented in CodeGen's MemoryFunction.cpp. An executable
+//region can only be obtained from the attached debugger while its script is
+//still running, so it is requested as early as possible during launch.
 extern "C" void MemFunc_InitJitArena(void);
-extern "C" const char* MemFunc_GetJitStatus(void);
-
-// ---- Temporary JIT self-test (diagnostic) --------------------------------
-// Probes each way of getting executable memory and reports the resulting page
-// protection, WITHOUT executing (so it can't crash). 'x' in max protection
-// means that method can produce runnable JIT memory on this device.
-static NSString* SC_ProtString(vm_prot_t p)
-{
-	return [NSString stringWithFormat:@"%c%c%c",
-		(p & VM_PROT_READ) ? 'r' : '-',
-		(p & VM_PROT_WRITE) ? 'w' : '-',
-		(p & VM_PROT_EXECUTE) ? 'x' : '-'];
-}
-
-static NSString* SC_QueryProt(void* mem)
-{
-	vm_address_t addr = (vm_address_t)(uintptr_t)mem;
-	vm_size_t vmsize = 0;
-	vm_region_basic_info_data_64_t info;
-	mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-	mach_port_t obj = MACH_PORT_NULL;
-	kern_return_t kr = vm_region_64(mach_task_self(), &addr, &vmsize,
-		VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &count, &obj);
-	if(kr != KERN_SUCCESS) return @"prot=?";
-	return [NSString stringWithFormat:@"prot=%@ max=%@",
-		SC_ProtString(info.protection), SC_ProtString(info.max_protection)];
-}
-
-static NSString* SC_ProbeMapJit()
-{
-	const size_t sz = 16384;
-	void* mem = mmap(NULL, sz, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANON|MAP_JIT, -1, 0);
-	if(mem == MAP_FAILED) return [NSString stringWithFormat:@"MAP_JIT: mmap FAILED errno=%d", errno];
-	typedef void (*wpfn)(int);
-	wpfn wp = (wpfn)dlsym(RTLD_DEFAULT, "pthread_jit_write_protect_np");
-	uint32_t code[2] = {0x52800540u, 0xD65F03C0u};
-	if(wp) wp(0);
-	memcpy(mem, code, sizeof(code));
-	if(wp) wp(1);
-	NSString* r = [NSString stringWithFormat:@"MAP_JIT(wp=%@): %@", wp?@"y":@"NIL", SC_QueryProt(mem)];
-	munmap(mem, sz);
-	return r;
-}
-
-static NSString* SC_ProbeRWX()
-{
-	const size_t sz = 16384;
-	void* mem = mmap(NULL, sz, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANON, -1, 0);
-	if(mem == MAP_FAILED) return [NSString stringWithFormat:@"RWX: mmap FAILED errno=%d", errno];
-	uint32_t code[2] = {0x52800540u, 0xD65F03C0u};
-	memcpy(mem, code, sizeof(code));
-	NSString* r = [NSString stringWithFormat:@"RWX: %@", SC_QueryProt(mem)];
-	munmap(mem, sz);
-	return r;
-}
-
-static NSString* SC_ProbeMprotect()
-{
-	const size_t sz = 16384;
-	void* mem = mmap(NULL, sz, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0);
-	if(mem == MAP_FAILED) return [NSString stringWithFormat:@"mprot: mmap FAILED errno=%d", errno];
-	uint32_t code[2] = {0x52800540u, 0xD65F03C0u};
-	memcpy(mem, code, sizeof(code));
-	int mp = mprotect(mem, sz, PROT_READ|PROT_EXEC);
-	NSString* r = (mp != 0)
-		? [NSString stringWithFormat:@"mprot RX: FAILED errno=%d", errno]
-		: [NSString stringWithFormat:@"mprot RX: OK %@", SC_QueryProt(mem)];
-	munmap(mem, sz);
-	return r;
-}
-
-// The exact sequence our CodeGen fix uses: mmap RWX (max=rwx) then mprotect r-x.
-static NSString* SC_ProbeRwxThenMprotect()
-{
-	const size_t sz = 16384;
-	void* mem = mmap(NULL, sz, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANON, -1, 0);
-	if(mem == MAP_FAILED) return [NSString stringWithFormat:@"RWX>RX: mmap FAILED errno=%d", errno];
-	uint32_t code[2] = {0x52800540u, 0xD65F03C0u};
-	memcpy(mem, code, sizeof(code));
-	int mp = mprotect(mem, sz, PROT_READ|PROT_EXEC);
-	NSString* r = [NSString stringWithFormat:@"RWX>RX: mp=%d %@", mp, SC_QueryProt(mem)];
-	munmap(mem, sz);
-	return r;
-}
-
-// Is the process actually JIT-enabled (debugger attached / CS_DEBUGGED)?
-extern "C" int csops(pid_t pid, unsigned int ops, void* useraddr, size_t usersize);
-static NSString* SC_CsDebugged()
-{
-	uint32_t flags = 0;
-	int rc = csops(getpid(), 0 /*CS_OPS_STATUS*/, &flags, sizeof(flags));
-	bool dbg = (flags & 0x10000000u) != 0; // CS_DEBUGGED
-	return [NSString stringWithFormat:@"CS_DEBUGGED=%d (csops rc=%d flags=0x%x)", dbg?1:0, rc, flags];
-}
-// --------------------------------------------------------------------------
+extern "C" bool MemFunc_IsJitReady(void);
 
 static bool IsJitAvailable()
 {
+	//On iOS 26 an executable region can only come from the attached debugger,
+	//so having obtained one is the authoritative signal. The ppid check below
+	//doesn't detect debuggers that attach after launch (ie. StikDebug).
+	if(MemFunc_IsJitReady()) return true;
 	//If ppid != 1, it means we're being run in the debugger
 	if(getppid() != 1) return true;
 	if([[AltServerJitService sharedAltServerJitService] jitEnabled])
@@ -306,12 +205,7 @@ static NSString* const reuseIdentifier = @"coverCell";
 {
 	if([identifier isEqualToString:@"showEmulator"] && !IsJitAvailable())
 	{
-		NSString* probeMsg = [NSString stringWithFormat:
-			@"%s\n\n%@\n%@\n\n%@\nppid=%d",
-			MemFunc_GetJitStatus(),
-			SC_ProbeMapJit(), SC_ProbeRwxThenMprotect(),
-			SC_CsDebugged(), getppid()];
-		UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"JIT unavailable" message:probeMsg preferredStyle:UIAlertControllerStyleAlert];
+		UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"JIT unavailable" message:@"JIT doesn't seem to be available at the moment. If JIT is not available, the emulator will crash. Do you wish to continue?" preferredStyle:UIAlertControllerStyleAlert];
 		{
 			UIAlertAction* continueAction = [UIAlertAction
 			    actionWithTitle:@"Continue"
