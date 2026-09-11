@@ -13,10 +13,6 @@ public:
 	enum
 	{
 		MAX_BUFFERS = 25,
-		//Number of buffers to queue up before letting the source play. Starting
-		//with a single buffer leaves no margin: one late update and the source
-		//runs dry again immediately.
-		PLAYBACK_START_BUFFERS = 4,
 	};
 
 	CSH_OpenAL();
@@ -39,7 +35,6 @@ private:
 	OpenAl::CSource m_source;
 
 	BufferList m_availableBuffers;
-	uint32 m_queuedBufferCount = 0;
 	uint64 m_lastUpdateTime;
 	bool m_mustSync;
 	ALuint m_bufferNames[MAX_BUFFERS];
