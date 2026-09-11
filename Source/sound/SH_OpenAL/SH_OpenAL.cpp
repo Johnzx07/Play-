@@ -1,6 +1,7 @@
 #include "SH_OpenAL.h"
 #include "alloca_def.h"
 #include <assert.h>
+#include <algorithm>
 
 //#define LOGGING
 #define SAMPLE_RATE 44100
@@ -47,6 +48,7 @@ void CSH_OpenAL::Reset()
 	CHECK_AL_ERROR();
 	m_availableBuffers.clear();
 	m_availableBuffers.insert(m_availableBuffers.begin(), m_bufferNames, m_bufferNames + MAX_BUFFERS);
+	m_queuedBufferCount = 0;
 }
 
 void CSH_OpenAL::RecycleBuffers()
@@ -59,6 +61,7 @@ void CSH_OpenAL::RecycleBuffers()
 		alSourceUnqueueBuffers(m_source, bufferCount, bufferNames);
 		CHECK_AL_ERROR();
 		m_availableBuffers.insert(m_availableBuffers.begin(), bufferNames, bufferNames + bufferCount);
+		m_queuedBufferCount -= std::min<uint32>(m_queuedBufferCount, bufferCount);
 	}
 }
 
@@ -84,11 +87,18 @@ void CSH_OpenAL::Write(int16* samples, unsigned int sampleCount, unsigned int sa
 
 	alSourceQueueBuffers(m_source, 1, &buffer);
 	CHECK_AL_ERROR();
+	m_queuedBufferCount++;
 
 	ALint sourceState = m_source.GetState();
 	if(sourceState != AL_PLAYING)
 	{
-		m_source.Play();
-		assert(m_source.GetState() == AL_PLAYING);
+		//Wait until a few buffers are queued before playing. The source stops
+		//whenever it runs out of data, and resuming with a single buffer just
+		//starves it again a moment later, turning one late update into a run of
+		//repeated stutters.
+		if(m_queuedBufferCount >= PLAYBACK_START_BUFFERS)
+		{
+			m_source.Play();
+		}
 	}
 }
