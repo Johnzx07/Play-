@@ -28,9 +28,9 @@ jobs:
         fetch-depth: 0
     - name: Force Fetch Git Tags
       run: git fetch --tags --force
-    - name: Cache patched MoltenVK
+    - name: Restore patched MoltenVK
       id: moltenvk-cache
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: ~/moltenvk-patched/MoltenVK.xcframework
         key: moltenvk-v1.4.2-fbfetch-1
@@ -46,11 +46,19 @@ jobs:
         make ios
         mkdir -p ~/moltenvk-patched
         cp -R Package/Latest/MoltenVK/dynamic/MoltenVK.xcframework ~/moltenvk-patched/
+    - name: Save patched MoltenVK
+      if: steps.moltenvk-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/moltenvk-patched/MoltenVK.xcframework
+        key: moltenvk-v1.4.2-fbfetch-1
     - name: Install patched MoltenVK over the SDK copy
       run: |
         test -d ~/moltenvk-patched/MoltenVK.xcframework || { echo '::error::patched MoltenVK.xcframework missing'; exit 1; }
-        rm -rf "$VULKAN_SDK/lib/MoltenVK.xcframework"
-        cp -R ~/moltenvk-patched/MoltenVK.xcframework "$VULKAN_SDK/lib/"
+        # The SDK is installed with sudo, so its files are root owned.
+        sudo rm -rf "$VULKAN_SDK/lib/MoltenVK.xcframework"
+        sudo cp -R ~/moltenvk-patched/MoltenVK.xcframework "$VULKAN_SDK/lib/"
+        test -d "$VULKAN_SDK/lib/MoltenVK.xcframework/ios-arm64" || { echo '::error::patched MoltenVK missing ios-arm64 slice'; ls -la "$VULKAN_SDK/lib/MoltenVK.xcframework" || true; exit 1; }
         echo "Installed patched MoltenVK into $VULKAN_SDK/lib"
     - name: Set SHORT_HASH
       run: echo "VALUE=${LONG_HASH:0:8}" >> $GITHUB_OUTPUT
