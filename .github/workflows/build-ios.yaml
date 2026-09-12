@@ -28,6 +28,30 @@ jobs:
         fetch-depth: 0
     - name: Force Fetch Git Tags
       run: git fetch --tags --force
+    - name: Cache patched MoltenVK
+      id: moltenvk-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/moltenvk-patched/MoltenVK.xcframework
+        key: moltenvk-v1.4.2-fbfetch-1
+    - name: Build patched MoltenVK
+      if: steps.moltenvk-cache.outputs.cache-hit != 'true'
+      run: |
+        PATCH=$GITHUB_WORKSPACE/.github/moltenvk-patches/0001-enable-framebuffer-fetch-subpasses.patch
+        cd $RUNNER_WORKSPACE
+        git clone --depth 1 --branch v1.4.2 https://github.com/KhronosGroup/MoltenVK.git moltenvk-src
+        cd moltenvk-src
+        git apply --verbose "$PATCH"
+        ./fetchDependencies --ios
+        make ios
+        mkdir -p ~/moltenvk-patched
+        cp -R Package/Latest/MoltenVK/dynamic/MoltenVK.xcframework ~/moltenvk-patched/
+    - name: Install patched MoltenVK over the SDK copy
+      run: |
+        test -d ~/moltenvk-patched/MoltenVK.xcframework || { echo '::error::patched MoltenVK.xcframework missing'; exit 1; }
+        rm -rf "$VULKAN_SDK/lib/MoltenVK.xcframework"
+        cp -R ~/moltenvk-patched/MoltenVK.xcframework "$VULKAN_SDK/lib/"
+        echo "Installed patched MoltenVK into $VULKAN_SDK/lib"
     - name: Set SHORT_HASH
       run: echo "VALUE=${LONG_HASH:0:8}" >> $GITHUB_OUTPUT
       id: short_hash
