@@ -16,7 +16,7 @@ jobs:
         sudo ./InstallVulkan-${VULKAN_SDK_VERSION}.app/Contents/MacOS/InstallVulkan-${VULKAN_SDK_VERSION} in --al --c com.lunarg.vulkan.ios
         echo "VULKAN_SDK=${HOME}/VulkanSDK/${VULKAN_SDK_VERSION}/iOS" >> $GITHUB_ENV
       env:
-        VULKAN_SDK_VERSION: '1.4.309.0'
+        VULKAN_SDK_VERSION: '1.4.357.1'
     - name: Checkout
       uses: actions/checkout@v7
       with:
@@ -33,7 +33,13 @@ jobs:
       run: |
         mkdir build
         cd build
-        cmake .. -G"Xcode" -DCMAKE_TOOLCHAIN_FILE=../deps/Dependencies/cmake-ios/ios.cmake -DTARGET_IOS=ON -DCMAKE_PREFIX_PATH=$VULKAN_SDK -DBUILD_PSFPLAYER=ON -DBUILD_LIBRETRO_CORE=yes
+        cmake .. -G"Xcode" -DCMAKE_TOOLCHAIN_FILE=../deps/Dependencies/cmake-ios/ios.cmake -DTARGET_IOS=ON -DCMAKE_PREFIX_PATH=$VULKAN_SDK -DBUILD_PSFPLAYER=ON -DBUILD_LIBRETRO_CORE=yes 2>&1 | tee cmake-configure.log
+        # find_package(Vulkan) failing only prints a message and silently drops the
+        # Vulkan renderer, which would ship an OpenGL-only build. Catch that here.
+        if grep -q "Building without Vulkan support" cmake-configure.log; then
+          echo "::error::Vulkan SDK was not picked up ($VULKAN_SDK) - refusing to ship a build without the Vulkan renderer."
+          exit 1
+        fi
     - name: Build
       run: |
         cd build
