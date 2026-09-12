@@ -13,6 +13,13 @@ public:
 	enum
 	{
 		MAX_BUFFERS = 25,
+		//Number of buffers to queue on the source before letting it play.
+		//Playback starting with a single buffer queued leaves no slack at all:
+		//the emulation thread has to hand over the next block within exactly
+		//one block's worth of wall clock time or the source runs dry and stops,
+		//which is audible as a click. Each extra buffer here buys one block of
+		//tolerance at the cost of one block of output latency.
+		PLAYBACK_START_BUFFERS = 2,
 	};
 
 	CSH_OpenAL();
@@ -37,5 +44,6 @@ private:
 	BufferList m_availableBuffers;
 	uint64 m_lastUpdateTime;
 	bool m_mustSync;
+	bool m_startingPlayback = false;
 	ALuint m_bufferNames[MAX_BUFFERS];
 };
